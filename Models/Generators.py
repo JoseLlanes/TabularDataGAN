@@ -90,3 +90,57 @@ class EncoderDecoderGenerator(nn.Module):
         latent = self.encoder(x)
         output = self.decoder(latent)
         return output
+
+
+class CNN1DEncoderDecoder(nn.Module):
+    def __init__(self, in_out_channels, num_layers=3, initial_filters=64, kernel_size=3, latent_dim=None):
+        """
+        Params:
+        - in_out_channels: Number of input and output channels.
+        - num_layers: Number of convolutional layers.
+        - initial_filters: Number of filters in the first convolutional layer.
+        - kernel_size: Size of the convolutional kernel.
+        - latent_dim: Size of the latent representation.
+        """
+        super(CNN1DEncoderDecoder, self).__init__()
+        
+        if latent_dim is None:
+            latent_dim = initial_filters // (2 ** (num_layers - 1))
+        
+        # ###############
+        # ### Encoder ###
+        # ###############
+        encoder_layers = []
+        filters = initial_filters
+        for i in range(num_layers):
+            encoder_layers.append(nn.Conv1d(in_out_channels if i == 0 else filters, 2 * filters, kernel_size, stride=2, padding=1))
+            encoder_layers.append(nn.BatchNorm1d(2 * filters))
+            encoder_layers.append(nn.ReLU())
+            filters *= 2
+        
+        self.encoder = nn.Sequential(*encoder_layers)
+        
+        # Latent layer
+        self.latent = nn.Conv1d(filters, latent_dim, kernel_size=1)
+        
+        # ###############
+        # ### Decoder ###
+        # ###############
+        decoder_layers = []
+        for i in range(num_layers):
+            decoder_layers.append(nn.ConvTranspose1d(latent_dim if i == 0 else filters, filters // 2, kernel_size, stride=2, padding=1, output_padding=1))
+            decoder_layers.append(nn.BatchNorm1d(filters // 2))
+            decoder_layers.append(nn.ReLU())
+            filters //= 2
+        
+        # Final layer
+        decoder_layers.append(nn.Conv1d(filters, in_out_channels, kernel_size=1))
+        decoder_layers.append(nn.Sigmoid())
+        
+        self.decoder = nn.Sequential(*decoder_layers)
+        
+    def forward(self, x):
+        encoded = self.encoder(x)
+        latent = self.latent(encoded)
+        output = self.decoder(latent)
+        return output
