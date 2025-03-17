@@ -1,8 +1,8 @@
 import numpy as np
 
 
-def stop_training_func(data_list, min_iter_to_check=100, epoch_dist=200, gen_label="generator_loss"):
-    if len(data_list) < min_iter_to_check:
+def stop_training_func(data_list, min_iter_to_check=500, epoch_dist=300, gen_label="generator_loss"):
+    if data_list[-1]["epoch"] < min_iter_to_check:
         return False
     
     epoch_array = np.array([d["epoch"] for d in data_list])
