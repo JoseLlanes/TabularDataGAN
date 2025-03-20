@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def stop_training_func(data_list, min_iter_to_check=500, epoch_dist=300, gen_label="generator_loss"):
+def stop_training_func(data_list, min_iter_to_check=500, epoch_dist=500, gen_label="generator_loss"):
     if data_list[-1]["epoch"] < min_iter_to_check:
         return False
     

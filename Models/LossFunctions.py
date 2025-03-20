@@ -57,6 +57,43 @@ def autocorrelation(x, epsilon=1e-8):
     return numerator / (denominator + epsilon)
 
 
+def matrix_kde_loss(features1, features2, bandwidth=0.1, num_points=100):
+    """
+    Computes the KDE loss for each feature dimension in a batched manner.
+    
+    Args:
+        features1 (Tensor): First feature tensor of shape (N, D).
+        features2 (Tensor): Second feature tensor of shape (M, D).
+        bandwidth (float): Bandwidth for the Gaussian kernel.
+        num_points (int): Number of points for numerical integration.
+    
+    Returns:
+        Tensor: A tensor of shape (D,) representing KDE loss for each feature.
+    """
+    x_min = torch.min(features1.min(dim=0).values, features2.min(dim=0).values)
+    x_max = torch.max(features1.max(dim=0).values, features2.max(dim=0).values)
+
+    # Generate evaluation points for each feature dimension
+    x_eval = torch.linspace(0, 1, num_points, device=features1.device).unsqueeze(1)  # (num_points, 1)
+    x_eval = x_min + x_eval * (x_max - x_min)  # Rescale to feature-wise min/max -> (num_points, D)
+
+    # Compute pairwise differences for KDE
+    def kde(x, samples):
+        diffs = x.unsqueeze(1) - samples.unsqueeze(0)  # (num_points, N, D)
+        weights = torch.exp(-0.5 * (diffs / bandwidth) ** 2) / (bandwidth * (2 * torch.pi) ** 0.5)
+        return weights.mean(dim=1)  # (num_points, D)
+
+    kde1 = kde(x_eval, features1)
+    kde2 = kde(x_eval, features2)
+
+    # Compute absolute difference and approximate integral using trapezoidal rule
+    pdf_diff = torch.abs(kde1 - kde2)
+    dx = (x_max - x_min) / num_points
+    integral = torch.sum(pdf_diff * dx, dim=0)
+
+    return integral.sum()
+
+
 def custom_loss(y_pred, data_target, method="all"):
     median_pred = torch.median(y_pred, dim=0).values
     median_target = torch.median(data_target, dim=0).values
@@ -79,7 +116,8 @@ def custom_loss(y_pred, data_target, method="all"):
             torch.sum(torch.abs(iqr_pred - iqr_target)) +
             torch.sum(torch.abs(autocorr_pred - autocorr_target)) +
             torch.sum(torch.abs(correlation_matrix(y_pred) - correlation_matrix(data_target))) + 
-            torch.sum(torch.abs(covariance_matrix(y_pred) - covariance_matrix(data_target)))
+            torch.sum(torch.abs(covariance_matrix(y_pred) - covariance_matrix(data_target))) +
+            matrix_kde_loss(y_pred, data_target)
         )
     else:
         custom_loss_value = 0
@@ -93,5 +131,7 @@ def custom_loss(y_pred, data_target, method="all"):
             custom_loss_value += torch.sum(torch.abs(correlation_matrix(y_pred) - correlation_matrix(data_target)))
         if "covmat" in method:
             custom_loss_value += torch.sum(torch.abs(covariance_matrix(y_pred) - covariance_matrix(data_target)))
+        if "integral" in method:
+            custom_loss_value += matrix_kde_loss(y_pred, data_target)
     
     return custom_loss_value
