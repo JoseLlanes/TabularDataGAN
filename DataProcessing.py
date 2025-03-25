@@ -4,7 +4,7 @@ from Processing.CategoricalProcessing import CategoricalToNumericalNorm as c2nn
 
 
 class DataPreprocessor:
-    def __init__(self, path, data_name, make_preprocess, include_categorical):
+    def __init__(self, path, data_name="", make_preprocess=True, include_categorical=True):
         self.path = path
         self.df = None
         self.cols_to_study = []
