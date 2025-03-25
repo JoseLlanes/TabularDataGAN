@@ -140,7 +140,7 @@ class EvaluateGeneratorModel:
         self.eval_gen_model_dict = {}
 
     # Study if a ML model could distinguish between generated and real data
-    def ml_difference_real_generated_data(self, num_generate_th=10, batch_data=500):
+    def ml_difference_real_generated_data(self, num_generate_th=30, batch_data=500):
         target_col = "RealTarget"
         data_column_dim = self.data_real_dict["data"].shape[1]
 
@@ -197,7 +197,7 @@ class EvaluateGeneratorModel:
                     )
                     
                     help_list.append(help_dict)
-                    
+
             df_gen_ml_metrics = pd.DataFrame(help_list)
 
         elif self.model_name == "SDV":
