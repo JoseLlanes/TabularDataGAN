@@ -9,6 +9,7 @@ class DataPreprocessor:
         self.df = None
         self.cols_to_study = []
         self.categorical_columns = []
+        self.nan_columns = []
         self.data_name = data_name
         self.make_preprocess = make_preprocess
         self.include_categorical = include_categorical
@@ -27,9 +28,14 @@ class DataPreprocessor:
             self.df[f"{col}_numeric"] = self.df[col].apply(lambda x: c2nn.generate_number(x, category_inter))
             self.cols_to_study.append(f"{col}_numeric")
 
+    def impute_nan_columns(self):
+        for col in self.nan_columns:
+            if isinstance(self.df[col].dropna().iloc[0], str):
+                self.df.loc[self.df[col].isna(), col] = "NotKnown"
+
     def preprocess(self):
-        """Prepares the dataset by loading, processing categories, and selecting columns."""
         self.load_data()
+        self.impute_nan_columns()
         if self.include_categorical:
             self.process_categorical_columns()
 
@@ -67,3 +73,14 @@ class MaternalDataPreprocessor(DataPreprocessor):
         self.include_categorical = include_categorical
         self.cols_to_study = ['Age', 'SystolicBP', 'DiastolicBP', 'BS', 'HeartRate']
         self.categorical_columns = ["BodyTemp"]
+
+
+class TitanicDataPreprocessor(DataPreprocessor):
+    def __init__(self, path="Data/Titanic.csv", data_name="Titanic", make_preprocess=True, include_categorical=True):
+        super().__init__(path)
+        self.data_name = data_name
+        self.make_preprocess = make_preprocess
+        self.include_categorical = include_categorical
+        self.cols_to_study = ["Age", "Fare"]
+        self.categorical_columns = ['Survived', "Pclass", "Sex", 'SibSp', 'Parch', 'Cabin', 'Embarked']
+        self.nan_columns = ['Cabin', 'Embarked']
