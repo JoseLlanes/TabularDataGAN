@@ -23,6 +23,8 @@ from DataProcessing import (AdultDataPreprocessor, MaternalDataPreprocessor,
 from Models import Generators, Discriminators, LossFunctions
 import Models.utils as utils
 
+from Processing.CategoricalProcessing import CategoricalToNumericalNorm as c2nn
+
 
 class GeneratorExperiment:
     def __init__(
@@ -39,15 +41,15 @@ class GeneratorExperiment:
         self.generator_lr = generator_lr
         self.discriminator_lr = discriminator_lr
         self.data_real_dict = data_real_dict
+        self.data_train = self.data_real_dict["data"][self.data_real_dict["cols_to_study"]]
         self.model_dict = model_dict
 
-    def generate_model_from_data(self, verbose=False):
-
+    def generate_model_from_data(self, verbose=False):        
         # Data Min-Max scaling
         scaler = MinMaxScaler()
-        data_min_max = scaler.fit_transform(self.data_real_dict["data"])
+        data_min_max = scaler.fit_transform(self.data_train)
 
-        data_col_dim = self.data_real_dict["data"].shape[1]
+        data_col_dim = self.data_train.shape[1]
 
         if model_dict["model_name"] == "LinearNN":
             generator = Generators.EncoderDecoderGenerator(in_out_dim=data_col_dim, latent_dim=16)
@@ -73,26 +75,18 @@ class GeneratorExperiment:
                 z_min_max = (z - z.min()) / (z.max() - z.min())
                 fake_data = generator(z_min_max)
 
-                if torch.any(torch.isnan(fake_data)) or torch.any(
-                    torch.isinf(fake_data)
-                ):
+                if torch.any(torch.isnan(fake_data)) or torch.any(torch.isinf(fake_data)):
                     print("Fake data contains NaNs or Infs!")
                     break
 
-                if torch.any(torch.isnan(real_data)) or torch.any(
-                    torch.isinf(real_data)
-                ):
+                if torch.any(torch.isnan(real_data)) or torch.any(torch.isinf(real_data)):
                     print("Real data contains NaNs or Infs!")
                     break
 
                 # Discriminator
                 optimizer_d.zero_grad()
-                real_loss = criterion(
-                    discriminator(real_data), torch.ones(self.batch_size, 1)
-                )
-                fake_loss = criterion(
-                    discriminator(fake_data.detach()), torch.zeros(self.batch_size, 1)
-                )
+                real_loss = criterion(discriminator(real_data), torch.ones(self.batch_size, 1))
+                fake_loss = criterion(discriminator(fake_data.detach()), torch.zeros(self.batch_size, 1))
                 d_loss = real_loss + fake_loss
                 d_loss.backward()
                 optimizer_d.step()
@@ -130,9 +124,7 @@ class GeneratorExperiment:
                     })
 
                     if epoch % 500 == 0 and verbose:
-                        print(
-                            f"Epoch {epoch}, D Loss: {d_loss.item()}, G Loss: {g_loss.item()}"
-                        )
+                        print(f"Epoch {epoch}, D Loss: {d_loss.item()}, G Loss: {g_loss.item()}")
 
                     if utils.stop_training_func(save_nn_data_list, epoch_dist=1000):
                         break
@@ -153,11 +145,11 @@ class GeneratorExperiment:
 # ################################
 # ### Evaluate Generator Model ###
 # ################################
-
-
 class EvaluateGeneratorModel:
-    def __init__(self, data_real_dict, generator, model_name):
+    def __init__(self, data_class, data_real_dict, generator, model_name):
+        self.data_class = data_class
         self.data_real_dict = data_real_dict
+        self.data_train = self.data_real_dict["data"][self.data_real_dict["cols_to_study"]]
         self.metrics_skm_dict = metrics_skm_dict
         self.model_name = model_name
         self.generator = generator
@@ -167,40 +159,46 @@ class EvaluateGeneratorModel:
                 ("logr", LogisticRegression(max_iter=500)),
         ])
 
+        self.cv_n_splits = 5
+        self.cv_n_repeats = 4
+        
         self.eval_gen_model_dict = {}
 
-    def train_model(self, data_to_ml, target_col="RealTarget"):
-        rkf = RepeatedKFold(n_splits=5, n_repeats=4, random_state=0)
+    def train_model(self, data_to_ml, ml_input_col, data_test=None, target_col="RealTarget"):
+        
+        if data_test is None:
+            data_test = data_to_ml.copy()
+        
+        rkf = RepeatedKFold(n_splits=self.cv_n_splits, n_repeats=self.cv_n_repeats)
 
         help_list = []
         for i, (train_idx, test_idx) in enumerate(rkf.split(data_to_ml.index)):
 
-            x_train = data_to_ml.loc[train_idx, self.data_real_dict["cols_to_study"]]
+            x_train = data_to_ml.loc[train_idx, ml_input_col]
             y_train = data_to_ml.loc[train_idx, target_col]
-            x_test = data_to_ml.loc[test_idx, self.data_real_dict["cols_to_study"]]
-            y_test = data_to_ml.loc[test_idx, target_col]
+            x_test = data_test.loc[test_idx, ml_input_col]
+            y_test = data_test.loc[test_idx, target_col]
 
             self.ml_model_pipeline.fit(x_train, y_train)
 
             y_pred = self.ml_model_pipeline.predict(x_test)
 
-            help_dict = {"iteration": i}
-            help_dict.update({k: v(y_test, y_pred) for k, v in self.metrics_skm_dict.items()})
-
+            # help_dict = {"iteration": i}
+            help_dict = {k: v(y_test, y_pred) for k, v in self.metrics_skm_dict.items()}
             help_list.append(help_dict)
 
         return help_list
 
     # Study if a ML model could distinguish between generated and real data
-
     def ml_difference_real_generated_data(self, num_generate_th=30, batch_data=500):
         target_col = "RealTarget"
-        data_column_dim = self.data_real_dict["data"].shape[1]
-
-        scaler = MinMaxScaler()
-        scaler.fit(self.data_real_dict["data"])
+        data_column_dim = self.data_train.shape[1]
 
         if self.model_name == "LinearNN":
+            
+            scaler = MinMaxScaler()
+            scaler.fit(self.data_train)
+            
             help_list = []
             for _ in range(num_generate_th):
 
@@ -222,24 +220,25 @@ class EvaluateGeneratorModel:
 
                 custom_syn_df[target_col] = 0
 
-                idx = np.random.randint(0, self.data_real_dict["data"].shape[0], batch_data)
-                df_real_sample = self.data_real_dict["data"].loc[idx]
+                idx = np.random.randint(0, self.data_train.shape[0], batch_data)
+                df_real_sample = self.data_train.loc[idx]
                 df_real_sample[target_col] = 1
 
                 df_both = pd.concat([df_real_sample, custom_syn_df], ignore_index=True)
-
-                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget")
+                
+                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget", 
+                                                 ml_input_col=self.data_real_dict["cols_to_study"])
                 help_list.extend(ml_score_list)
 
             df_gen_ml_metrics = pd.DataFrame(help_list)
 
         elif self.model_name == "SDV":
-            df_to_sdv = self.data_real_dict["data"]
+            df_to_sdv = self.data_train
             help_list = []
             for _ in range(num_generate_th):
 
                 idx = np.random.randint(0, df_to_sdv.shape[0], batch_data)
-                synthetic_data = self.generator.fit(data=df_to_sdv.loc[idx].reset_index(drop=True))
+                self.generator.fit(data=df_to_sdv.loc[idx].reset_index(drop=True))
                 synthetic_df_sdv = self.generator.sample(num_rows=batch_data)
                 synthetic_df_sdv[target_col] = 0
 
@@ -249,7 +248,8 @@ class EvaluateGeneratorModel:
 
                 df_both = pd.concat([df_real_sample, synthetic_df_sdv], ignore_index=True)
 
-                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget")
+                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget", 
+                                                 ml_input_col=self.data_real_dict["cols_to_study"])
                 help_list.extend(ml_score_list)
 
             df_gen_ml_metrics = pd.DataFrame(help_list)
@@ -258,18 +258,120 @@ class EvaluateGeneratorModel:
             {"ml_difference_real_generated_data": df_gen_ml_metrics}
         )
 
+    def ml_train_model_comparison(self, num_generate_th=10, batch_data=500):
+        
+        target_col = self.data_class.target_column
+        data_column_dim = self.data_train.shape[1]
+        category_inter = self.data_class.all_category_inter[target_col]
+        ml_input_list = [col for col in self.data_train.columns if target_col not in col]
+        
+        df_to_ml = self.data_train
+        
+        if self.model_name == "LinearNN":
+            
+            scaler = MinMaxScaler()
+            scaler.fit(self.data_train)
+            
+            help_list = []
+            for _ in range(num_generate_th):
+                
+                z = torch.randn(batch_data, data_column_dim)
+                z_minmax = (z - z.min()) / (z.max() - z.min())
+                synthetic_data = self.generator(z_minmax).detach().numpy()
+                synthetic_data = scaler.inverse_transform(synthetic_data)
+                synthetic_df = pd.DataFrame(synthetic_data, columns=self.data_real_dict["cols_to_study"])
+                
+                # Transform to classification column the target column
+                synthetic_df[target_col] = synthetic_df[f"{target_col}_numeric"].apply(
+                    lambda x: c2nn.inverse_categorical_interval(x, category_inter)
+                )
+                synthetic_df, _ = self.data_class.encode_target(synthetic_df)
+                
+                # ### Real data ###
+                idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
+                df_real_sample = df_to_ml.loc[idx].reset_index(drop=True)
+                
+                df_real_sample[target_col] = df_real_sample[f"{target_col}_numeric"].apply(
+                    lambda x: c2nn.inverse_categorical_interval(x, category_inter)
+                )
+                df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                
+                scenarios = [
+                    ("train_real_test_real", df_real_sample, None),
+                    ("train_real_test_gen", df_real_sample, synthetic_df),
+                    ("train_gen_test_gen", synthetic_df, None),
+                    ("train_gen_test_real", synthetic_df, df_real_sample),
+                ]
+                
+                df_results_list = []
+                for scenario_name, train_data, test_data in scenarios:
+                    results = self.train_model(data_to_ml=train_data, data_test=test_data, 
+                                               target_col="target", ml_input_col=ml_input_list)
+                    rename_dict = {col: f"{col}_{scenario_name}" for col in self.metrics_skm_dict.keys()}
+                    df_results_list.append(pd.DataFrame(results).rename(columns=rename_dict))
+                
+                help_list.append(pd.concat(df_results_list, axis=1))
+            
+            df_ml_metrics = pd.concat(help_list, ignore_index=True)
+            
+        elif self.model_name == "SDV":
+
+            help_list = []
+            for _ in range(num_generate_th):
+                # ### Generated data ###
+                idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
+                self.generator.fit(data=df_to_ml.loc[idx].reset_index(drop=True))
+                synthetic_df_sdv = self.generator.sample(num_rows=batch_data)
+
+                # Transform to classification column the target column
+                synthetic_df_sdv[target_col] = synthetic_df_sdv[f"{target_col}_numeric"].apply(
+                    lambda x: c2nn.inverse_categorical_interval(x, category_inter)
+                )
+                synthetic_df_sdv, _ = self.data_class.encode_target(synthetic_df_sdv)
+                
+                # ### Real data ###
+                idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
+                df_real_sample = df_to_ml.loc[idx].reset_index(drop=True)
+                
+                df_real_sample[target_col] = df_real_sample[f"{target_col}_numeric"].apply(
+                    lambda x: c2nn.inverse_categorical_interval(x, category_inter)
+                )
+                df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                
+                scenarios = [
+                    ("train_real_test_real", df_real_sample, None),
+                    ("train_real_test_gen", df_real_sample, synthetic_df_sdv),
+                    ("train_gen_test_gen", synthetic_df_sdv, None),
+                    ("train_gen_test_real", synthetic_df_sdv, df_real_sample),
+                ]
+                
+                df_results_list = []
+                for scenario_name, train_data, test_data in scenarios:
+                    results = self.train_model(data_to_ml=train_data, data_test=test_data, 
+                                               target_col="target", ml_input_col=ml_input_list)
+                    rename_dict = {col: f"{col}_{scenario_name}" for col in self.metrics_skm_dict.keys()}
+                    df_results_list.append(pd.DataFrame(results).rename(columns=rename_dict))
+                
+                help_list.append(pd.concat(df_results_list, axis=1))
+            
+            df_ml_metrics = pd.concat(help_list, ignore_index=True)
+            
+        self.eval_gen_model_dict.update(
+            {"ml_train_model_comparison": df_ml_metrics}
+        )
+
 
 if __name__ == "__main__":
     all_data_list = [
-        TitanicDataPreprocessor().get_data(),
-        AdultDataPreprocessor().get_data(),
-        MaternalDataPreprocessor().get_data(),
+        AdultDataPreprocessor,
+        TitanicDataPreprocessor,
+        MaternalDataPreprocessor,
     ]
 
     generative_model_list = [
+        {"model_name": "LinearNN", "loss_function": "BCELoss"},
         {"model_name": "SDV", "loss_function": "GaussianCopulaSynthesizer"},
         {"model_name": "LinearNN", "loss_function": "iqr-covmat-integral"},
-        {"model_name": "LinearNN", "loss_function": "BCELoss"},
         {"model_name": "LinearNN", "loss_function": "both-loss_iqr-covmat-integral"}
     ]
 
@@ -281,27 +383,31 @@ if __name__ == "__main__":
 
     data_model_list = [all_data_list, generative_model_list]
     comb_data_gen_list = list(itertools.product(*data_model_list))
-    for data_dict, model_dict in comb_data_gen_list:
+    for data_class, model_dict in comb_data_gen_list:
+        
+        data_class_init = data_class()
+        data_dict = data_class_init.custom_preprocess()
         
         print(data_dict["data_name"], model_dict["model_name"], model_dict["loss_function"])
         print("Columns to use model", data_dict["cols_to_study"])
 
         if model_dict["model_name"] != "SDV":
-            gen_experiment = GeneratorExperiment(
-                data_real_dict=data_dict, model_dict=model_dict
-            )
+            gen_experiment = GeneratorExperiment(data_real_dict=data_dict, model_dict=model_dict)
             generator_model = gen_experiment.generate_model_from_data(verbose=True)
         else:
             sdv_metadata = SingleTableMetadata()
-            sdv_metadata.detect_from_dataframe(data=data_dict["data"])
+            sdv_metadata.detect_from_dataframe(data=data_dict["data"][data_dict["cols_to_study"]])
             generator_model = GaussianCopulaSynthesizer(sdv_metadata)
 
         # Evaluate generator model
         eval_gen_model = EvaluateGeneratorModel(
+            data_class=data_class_init,
             data_real_dict=data_dict,
             generator=generator_model,
             model_name=model_dict["model_name"],
         )
+        
+        eval_gen_model.ml_train_model_comparison()
         eval_gen_model.ml_difference_real_generated_data()
 
         generator_eval_results_dict = eval_gen_model.eval_gen_model_dict
@@ -312,3 +418,5 @@ if __name__ == "__main__":
         save_dict_pickle = (f"Results/GenResults_{data_name}_{model_name}-{loss_function_n}.pkl")
         with open(save_dict_pickle, "wb") as f:
             pickle.dump(generator_eval_results_dict, f)
+            
+        del data_class
