@@ -271,7 +271,7 @@ class EvaluateGeneratorModel:
             {"ml_difference_real_generated_data": df_gen_ml_metrics}
         )
 
-    def ml_train_model_comparison(self, num_generate_th=10, batch_data=500):
+    def ml_train_model_comparison(self, num_generate_th=30, batch_data=1000):
         
         target_col = self.data_class.target_column
         data_column_dim = self.data_train.shape[1]
