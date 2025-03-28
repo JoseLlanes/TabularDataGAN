@@ -69,8 +69,8 @@ class AdultDataPreprocessor(DataPreprocessor):
             'Age', 'Final Weight', 'Education Number', 'Capital Gain', 'Capital Loss', 'Hours Per Week'
         ] + [self.target_column]
         self.categorical_columns = [
-            "Work Class", "Education", "Marital Status", "Occupation", "Relationship", "Race", "Gender", "Salary"
-        ]
+            "Work Class", "Education", "Marital Status", "Occupation", "Relationship", "Race", "Gender"
+        ] + [self.target_column]
         
     def encode_target(self, df, new_target_col="target"):
         target_mapping = {"<=50K": 0, ">50K": 1}
@@ -99,7 +99,7 @@ class MaternalDataPreprocessor(DataPreprocessor):
         self.cols_to_study = [
             'Age', 'SystolicBP', 'DiastolicBP', 'BS', 'HeartRate'
         ] + [self.target_column]
-        self.categorical_columns = ["BodyTemp"]
+        self.categorical_columns = ["BodyTemp"] + [self.target_column]
     
     
     def encode_target(self, df, new_target_col="target"):

@@ -164,7 +164,7 @@ class EvaluateGeneratorModel:
         
         self.eval_gen_model_dict = {}
 
-    def train_model(self, data_to_ml, ml_input_col, data_test=None, target_col="RealTarget"):
+    def train_model(self, data_to_ml, ml_input_col, data_test=None, target_col="RealTarget", join_data=None):
         
         if data_test is None:
             data_test = data_to_ml.copy()
@@ -173,12 +173,19 @@ class EvaluateGeneratorModel:
 
         help_list = []
         for i, (train_idx, test_idx) in enumerate(rkf.split(data_to_ml.index)):
-
+            
             x_train = data_to_ml.loc[train_idx, ml_input_col]
             y_train = data_to_ml.loc[train_idx, target_col]
+            if join_data is not None:
+                x_train = pd.concat([x_train, join_data[ml_input_col]], ignore_index=True)
+                y_train = pd.concat([y_train, join_data[target_col]], ignore_index=True)
+
+            if len(np.unique(y_train)) < 2:
+                continue
+            
             x_test = data_test.loc[test_idx, ml_input_col]
             y_test = data_test.loc[test_idx, target_col]
-
+            
             self.ml_model_pipeline.fit(x_train, y_train)
 
             y_pred = self.ml_model_pipeline.predict(x_test)
@@ -226,8 +233,11 @@ class EvaluateGeneratorModel:
 
                 df_both = pd.concat([df_real_sample, custom_syn_df], ignore_index=True)
                 
-                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget", 
-                                                 ml_input_col=self.data_real_dict["cols_to_study"])
+                ml_score_list = self.train_model(
+                    data_to_ml=df_both, 
+                    target_col="RealTarget", 
+                    ml_input_col=self.data_real_dict["cols_to_study"]
+                )
                 help_list.extend(ml_score_list)
 
             df_gen_ml_metrics = pd.DataFrame(help_list)
@@ -248,8 +258,11 @@ class EvaluateGeneratorModel:
 
                 df_both = pd.concat([df_real_sample, synthetic_df_sdv], ignore_index=True)
 
-                ml_score_list = self.train_model(data_to_ml=df_both, target_col="RealTarget", 
-                                                 ml_input_col=self.data_real_dict["cols_to_study"])
+                ml_score_list = self.train_model(
+                    data_to_ml=df_both, 
+                    target_col="RealTarget", 
+                    ml_input_col=self.data_real_dict["cols_to_study"]
+                )
                 help_list.extend(ml_score_list)
 
             df_gen_ml_metrics = pd.DataFrame(help_list)
@@ -285,7 +298,10 @@ class EvaluateGeneratorModel:
                 synthetic_df[target_col] = synthetic_df[f"{target_col}_numeric"].apply(
                     lambda x: c2nn.inverse_categorical_interval(x, category_inter)
                 )
-                synthetic_df, _ = self.data_class.encode_target(synthetic_df)
+                if hasattr(self.data_class, 'encode_target'):
+                    synthetic_df, _ = self.data_class.encode_target(synthetic_df)
+                else:
+                    synthetic_df["target"] = synthetic_df[target_col]
                 
                 # ### Real data ###
                 idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
@@ -294,19 +310,26 @@ class EvaluateGeneratorModel:
                 df_real_sample[target_col] = df_real_sample[f"{target_col}_numeric"].apply(
                     lambda x: c2nn.inverse_categorical_interval(x, category_inter)
                 )
-                df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                if hasattr(self.data_class, 'encode_target'):
+                    df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                else:
+                    df_real_sample["target"] = df_real_sample[target_col]
                 
                 scenarios = [
-                    ("train_real_test_real", df_real_sample, None),
-                    ("train_real_test_gen", df_real_sample, synthetic_df),
-                    ("train_gen_test_gen", synthetic_df, None),
-                    ("train_gen_test_real", synthetic_df, df_real_sample),
+                    ("train_real_test_real", df_real_sample, None, None),
+                    ("train_gen_test_real", synthetic_df, df_real_sample, None),
+                    ("train_realgen_test_real", df_real_sample, None, synthetic_df),
                 ]
                 
                 df_results_list = []
-                for scenario_name, train_data, test_data in scenarios:
-                    results = self.train_model(data_to_ml=train_data, data_test=test_data, 
-                                               target_col="target", ml_input_col=ml_input_list)
+                for scenario_name, train_data, test_data, join_data in scenarios:
+                    results = self.train_model(
+                        data_to_ml=train_data, 
+                        data_test=test_data, 
+                        target_col="target", 
+                        ml_input_col=ml_input_list, 
+                        join_data=join_data
+                    )
                     rename_dict = {col: f"{col}_{scenario_name}" for col in self.metrics_skm_dict.keys()}
                     df_results_list.append(pd.DataFrame(results).rename(columns=rename_dict))
                 
@@ -327,7 +350,10 @@ class EvaluateGeneratorModel:
                 synthetic_df_sdv[target_col] = synthetic_df_sdv[f"{target_col}_numeric"].apply(
                     lambda x: c2nn.inverse_categorical_interval(x, category_inter)
                 )
-                synthetic_df_sdv, _ = self.data_class.encode_target(synthetic_df_sdv)
+                if hasattr(self.data_class, 'encode_target'):
+                    synthetic_df_sdv, _ = self.data_class.encode_target(synthetic_df_sdv)
+                else:
+                    synthetic_df_sdv["target"] = synthetic_df_sdv[target_col]
                 
                 # ### Real data ###
                 idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
@@ -336,19 +362,26 @@ class EvaluateGeneratorModel:
                 df_real_sample[target_col] = df_real_sample[f"{target_col}_numeric"].apply(
                     lambda x: c2nn.inverse_categorical_interval(x, category_inter)
                 )
-                df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                if hasattr(self.data_class, 'encode_target'):
+                    df_real_sample, _ = self.data_class.encode_target(df_real_sample)
+                else:
+                    df_real_sample["target"] = df_real_sample[target_col]
                 
                 scenarios = [
-                    ("train_real_test_real", df_real_sample, None),
-                    ("train_real_test_gen", df_real_sample, synthetic_df_sdv),
-                    ("train_gen_test_gen", synthetic_df_sdv, None),
-                    ("train_gen_test_real", synthetic_df_sdv, df_real_sample),
+                    ("train_real_test_real", df_real_sample, None, None),
+                    ("train_gen_test_real", synthetic_df_sdv, df_real_sample, None),
+                    ("train_realgen_test_real", df_real_sample, None, synthetic_df_sdv),
                 ]
                 
                 df_results_list = []
-                for scenario_name, train_data, test_data in scenarios:
-                    results = self.train_model(data_to_ml=train_data, data_test=test_data, 
-                                               target_col="target", ml_input_col=ml_input_list)
+                for scenario_name, train_data, test_data, join_data in scenarios:
+                    results = self.train_model(
+                        data_to_ml=train_data, 
+                        data_test=test_data, 
+                        target_col="target", 
+                        ml_input_col=ml_input_list, 
+                        join_data=join_data
+                    )
                     rename_dict = {col: f"{col}_{scenario_name}" for col in self.metrics_skm_dict.keys()}
                     df_results_list.append(pd.DataFrame(results).rename(columns=rename_dict))
                 
@@ -363,9 +396,9 @@ class EvaluateGeneratorModel:
 
 if __name__ == "__main__":
     all_data_list = [
-        AdultDataPreprocessor,
-        TitanicDataPreprocessor,
         MaternalDataPreprocessor,
+        TitanicDataPreprocessor,
+        AdultDataPreprocessor,
     ]
 
     generative_model_list = [
