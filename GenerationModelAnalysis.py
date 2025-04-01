@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import scipy as sp
 import pickle
 import itertools
 
@@ -17,8 +18,12 @@ import torch.optim as optim
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import SingleTableMetadata
 
-from DataProcessing import (AdultDataPreprocessor, MaternalDataPreprocessor, 
-                            TitanicDataPreprocessor)
+from DataProcessing import (AdultDataPreprocessor, 
+                            MaternalDataPreprocessor, 
+                            TitanicDataPreprocessor, 
+                            StudentDropoutDataPreprocessor, 
+                            WineQualityDataPreprocessor, 
+                            WisconsinDataPreprocessor)
 
 from Models import Generators, Discriminators, LossFunctions
 import Models.utils as utils
@@ -51,8 +56,11 @@ class GeneratorExperiment:
 
         data_col_dim = self.data_train.shape[1]
 
-        if model_dict["model_name"] == "LinearNN":
-            generator = Generators.EncoderDecoderGenerator(in_out_dim=data_col_dim, latent_dim=16)
+        if model_dict["model_name"] in ["LinearNN", "CNN1D"]:
+            if model_dict["model_name"] == "CNN1D":
+                generator = Generators.EncoderDecoderCNN1D(input_dim=data_col_dim)
+            else:
+                generator = Generators.EncoderDecoderGenerator(in_out_dim=data_col_dim, latent_dim=16)
             optimizer_g = optim.Adam(generator.parameters(), lr=self.generator_lr)
 
             # Initialize discriminator
@@ -73,8 +81,14 @@ class GeneratorExperiment:
 
                 z = torch.randn(self.batch_size, data_col_dim)
                 z_min_max = (z - z.min()) / (z.max() - z.min())
-                fake_data = generator(z_min_max)
-
+                
+                if model_dict["model_name"] == "CNN1D":
+                    z_reshape = z_min_max.reshape(self.batch_size, data_col_dim, 1)
+                    fake_data_reshape = generator(z_reshape)
+                    fake_data = fake_data_reshape.reshape(self.batch_size, data_col_dim)
+                else:
+                    fake_data = generator(z_min_max)
+                
                 if torch.any(torch.isnan(fake_data)) or torch.any(torch.isinf(fake_data)):
                     print("Fake data contains NaNs or Infs!")
                     break
@@ -201,17 +215,26 @@ class EvaluateGeneratorModel:
         target_col = "RealTarget"
         data_column_dim = self.data_train.shape[1]
 
-        if self.model_name == "LinearNN":
+        if model_dict["model_name"] in ["LinearNN", "CNN1D"]:
             
             scaler = MinMaxScaler()
             scaler.fit(self.data_train)
             
             help_list = []
             for _ in range(num_generate_th):
-
                 z = torch.randn(batch_data, data_column_dim)
-                z_minmax = (z - z.min()) / (z.max() - z.min())
-                synthetic_data = self.generator(z_minmax).detach().numpy()
+                z_min_max = (z - z.min()) / (z.max() - z.min())
+                
+                if model_dict["model_name"] == "CNN1D":
+                    z_reshape = z_min_max.reshape(batch_data, data_column_dim, 1)
+                    fake_data_reshape = self.generator(z_reshape).detach().numpy()
+                    synthetic_data = fake_data_reshape.reshape(batch_data, data_column_dim)
+                else:
+                    synthetic_data = self.generator(z_min_max).detach().numpy()
+                
+                # z = torch.randn(batch_data, data_column_dim)
+                # z_minmax = (z - z.min()) / (z.max() - z.min())
+                # synthetic_data = self.generator(z_minmax).detach().numpy()
                 synthetic_data = scaler.inverse_transform(synthetic_data)
                 synthetic_df = pd.DataFrame(
                     synthetic_data, columns=self.data_real_dict["cols_to_study"]
@@ -280,7 +303,7 @@ class EvaluateGeneratorModel:
         
         df_to_ml = self.data_train
         
-        if self.model_name == "LinearNN":
+        if model_dict["model_name"] in ["LinearNN", "CNN1D"]:
             
             scaler = MinMaxScaler()
             scaler.fit(self.data_train)
@@ -289,8 +312,18 @@ class EvaluateGeneratorModel:
             for _ in range(num_generate_th):
                 
                 z = torch.randn(batch_data, data_column_dim)
-                z_minmax = (z - z.min()) / (z.max() - z.min())
-                synthetic_data = self.generator(z_minmax).detach().numpy()
+                z_min_max = (z - z.min()) / (z.max() - z.min())
+                
+                if model_dict["model_name"] == "CNN1D":
+                    z_reshape = z_min_max.reshape(batch_data, data_column_dim, 1)
+                    fake_data_reshape = self.generator(z_reshape).detach().numpy()
+                    synthetic_data = fake_data_reshape.reshape(batch_data, data_column_dim)
+                else:
+                    synthetic_data = self.generator(z_min_max).detach().numpy()
+                
+                # z = torch.randn(batch_data, data_column_dim)
+                # z_minmax = (z - z.min()) / (z.max() - z.min())
+                # synthetic_data = self.generator(z_minmax).detach().numpy()
                 synthetic_data = scaler.inverse_transform(synthetic_data)
                 synthetic_df = pd.DataFrame(synthetic_data, columns=self.data_real_dict["cols_to_study"])
                 
@@ -392,20 +425,84 @@ class EvaluateGeneratorModel:
         self.eval_gen_model_dict.update(
             {"ml_train_model_comparison": df_ml_metrics}
         )
+        
+    def check_statistics(self, num_generate_th=30, batch_data=500):
+        
+        data_column_dim = self.data_train.shape[1]
+        
+        help_list = []
+        for _ in range(num_generate_th):
+            if model_dict["model_name"] in ["LinearNN", "CNN1D"]:
+                scaler = MinMaxScaler()
+                scaler.fit(self.data_train)
+                
+                z = torch.randn(batch_data, data_column_dim)
+                z_min_max = (z - z.min()) / (z.max() - z.min())
+                
+                if self.model_name == "CNN1D":
+                    z_reshape = z_min_max.reshape(batch_data, data_column_dim, 1)
+                    fake_data_reshape = self.generator(z_reshape).detach().numpy()
+                    synthetic_data = fake_data_reshape.reshape(batch_data, data_column_dim)
+                else:
+                    synthetic_data = self.generator(z_min_max).detach().numpy()
+                # z = torch.randn(batch_data, data_column_dim)
+                # z_minmax = (z - z.min()) / (z.max() - z.min())
+                # synthetic_data = self.generator(z_minmax).detach().numpy()
+                synthetic_data = scaler.inverse_transform(synthetic_data)
+                synthetic_df = pd.DataFrame(
+                    synthetic_data, columns=self.data_real_dict["cols_to_study"]
+                )
+            else:
+                idx = np.random.randint(0, self.data_train.shape[0], batch_data)
+                self.generator.fit(data=self.data_train.loc[idx].reset_index(drop=True))
+                synthetic_df = self.generator.sample(num_rows=batch_data)
+                
+            synthetic_df
+            
+            idx = np.random.randint(0, self.data_train.shape[0], batch_data)
+            df_real_sample = self.data_train.loc[idx]
+            
+            help_dict = {}
+            for col in self.data_train.columns:
+                _, p_value = sp.stats.mannwhitneyu(
+                    synthetic_df[col].values, df_real_sample[col].values, 
+                    alternative='two-sided'
+                )
+                
+                help_dict[col] = p_value
+            help_list.append(help_dict)
+        
+        df_help = pd.DataFrame(help_list)   
+        
+        stats_dict = {}
+        for col in df_help.columns:
+            stats_dict[f"up_05_pvalue_{col}"] = np.mean(df_help[col] > 0.05)
+        
+        df_stats = pd.DataFrame(stats_dict, index=[0])
+        
+        self.eval_gen_model_dict.update(
+            {"check_statistics": df_stats}
+        )
 
 
 if __name__ == "__main__":
     all_data_list = [
+        WisconsinDataPreprocessor,
+        WineQualityDataPreprocessor,
+        StudentDropoutDataPreprocessor,
         MaternalDataPreprocessor,
         TitanicDataPreprocessor,
         AdultDataPreprocessor,
     ]
 
     generative_model_list = [
+        {"model_name": "CNN1D", "loss_function": "BCELoss"},
+        {"model_name": "CNN1D", "loss_function": "iqr-covmat-integral"},
+        {"model_name": "CNN1D", "loss_function": "both-loss_iqr-covmat-integral"},
         {"model_name": "LinearNN", "loss_function": "BCELoss"},
         {"model_name": "SDV", "loss_function": "GaussianCopulaSynthesizer"},
         {"model_name": "LinearNN", "loss_function": "iqr-covmat-integral"},
-        {"model_name": "LinearNN", "loss_function": "both-loss_iqr-covmat-integral"}
+        {"model_name": "LinearNN", "loss_function": "both-loss_iqr-covmat-integral"},
     ]
 
     metrics_skm_dict = {
@@ -440,6 +537,7 @@ if __name__ == "__main__":
             model_name=model_dict["model_name"],
         )
         
+        eval_gen_model.check_statistics()
         eval_gen_model.ml_train_model_comparison()
         eval_gen_model.ml_difference_real_generated_data()
 
