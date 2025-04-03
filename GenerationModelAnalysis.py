@@ -17,6 +17,7 @@ import torch.optim as optim
 
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import SingleTableMetadata
+from sdv.evaluation.single_table import evaluate_quality
 
 from DataProcessing import (AdultDataPreprocessor, 
                             MaternalDataPreprocessor, 
@@ -456,8 +457,6 @@ class EvaluateGeneratorModel:
                 idx = np.random.randint(0, self.data_train.shape[0], batch_data)
                 self.generator.fit(data=self.data_train.loc[idx].reset_index(drop=True))
                 synthetic_df = self.generator.sample(num_rows=batch_data)
-                
-            synthetic_df
             
             idx = np.random.randint(0, self.data_train.shape[0], batch_data)
             df_real_sample = self.data_train.loc[idx]
@@ -465,18 +464,32 @@ class EvaluateGeneratorModel:
             help_dict = {}
             for col in self.data_train.columns:
                 _, p_value = sp.stats.mannwhitneyu(
-                    synthetic_df[col].values, df_real_sample[col].values, 
+                    df_real_sample[col].values, synthetic_df[col].values, 
                     alternative='two-sided'
                 )
                 
                 help_dict[col] = p_value
+            
+            
+            sdv_metadata = SingleTableMetadata()
+            sdv_metadata.detect_from_dataframe(data=data_dict["data"][data_dict["cols_to_study"]])
+            quality_report = evaluate_quality(
+                df_real_sample,
+                synthetic_df,
+                sdv_metadata
+            )
+            help_dict["SDV_QR_score"] = quality_report.get_score()
+            
             help_list.append(help_dict)
-        
+
         df_help = pd.DataFrame(help_list)   
         
         stats_dict = {}
         for col in df_help.columns:
-            stats_dict[f"up_05_pvalue_{col}"] = np.mean(df_help[col] > 0.05)
+            if col == "SDV_QR_score":
+                stats_dict[f"mean_{col}"] = np.mean(df_help[col])
+            else:
+                stats_dict[f"up_05_pvalue_{col}"] = np.mean(df_help[col] > 0.05)
         
         df_stats = pd.DataFrame(stats_dict, index=[0])
         
