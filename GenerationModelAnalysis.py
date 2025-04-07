@@ -1,4 +1,6 @@
+import gc
 import os
+import time
 import numpy as np
 import pandas as pd
 import scipy as sp
@@ -15,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from sdv.single_table import GaussianCopulaSynthesizer
+from sdv.single_table import GaussianCopulaSynthesizer, CopulaGANSynthesizer, CTGANSynthesizer, TVAESynthesizer
 from sdv.metadata import SingleTableMetadata
 from sdv.evaluation.single_table import evaluate_quality
 
@@ -509,15 +511,18 @@ if __name__ == "__main__":
     ]
 
     generative_model_list = [
+        {"model_name": "SDV", "loss_function": "GaussianCopulaSynthesizer"},
+        {"model_name": "SDV", "loss_function": "CopulaGANSynthesizer"},
+        {"model_name": "SDV", "loss_function": "CTGANSynthesizer"},
+        {"model_name": "SDV", "loss_function": "TVAESynthesizer"},
+        {"model_name": "LinearNN", "loss_function": "BCELoss"},
+        {"model_name": "LinearNN", "loss_function": "iqr-covmat-integral"},
+        {"model_name": "LinearNN", "loss_function": "both-loss_iqr-covmat-integral"},
         {"model_name": "CNN1D", "loss_function": "BCELoss"},
         {"model_name": "CNN1D", "loss_function": "iqr-covmat-integral"},
         {"model_name": "CNN1D", "loss_function": "both-loss_iqr-covmat-integral"},
-        {"model_name": "LinearNN", "loss_function": "BCELoss"},
-        {"model_name": "SDV", "loss_function": "GaussianCopulaSynthesizer"},
-        {"model_name": "LinearNN", "loss_function": "iqr-covmat-integral"},
-        {"model_name": "LinearNN", "loss_function": "both-loss_iqr-covmat-integral"},
     ]
-
+    
     metrics_skm_dict = {
         "accuracy": skm.accuracy_score,
         "kappa": skm.cohen_kappa_score,
@@ -537,11 +542,27 @@ if __name__ == "__main__":
         if model_dict["model_name"] != "SDV":
             gen_experiment = GeneratorExperiment(data_real_dict=data_dict, model_dict=model_dict)
             generator_model = gen_experiment.generate_model_from_data(verbose=True)
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+            time.sleep(1)
+
+            os.remove("SaveModels/generator_NN.pth")
+            
         else:
             sdv_metadata = SingleTableMetadata()
             sdv_metadata.detect_from_dataframe(data=data_dict["data"][data_dict["cols_to_study"]])
-            generator_model = GaussianCopulaSynthesizer(sdv_metadata)
-
+            if model_dict["loss_function"] == "GaussianCopulaSynthesizer":
+                generator_model = GaussianCopulaSynthesizer(sdv_metadata)
+            elif model_dict["loss_function"] == "CopulaGANSynthesizer":
+                generator_model = CopulaGANSynthesizer(sdv_metadata)
+            elif model_dict["loss_function"] == "CTGANSynthesizer":
+                generator_model = CTGANSynthesizer(sdv_metadata)
+            elif model_dict["loss_function"] == "TVAESynthesizer":
+                generator_model = TVAESynthesizer(sdv_metadata)
+            else:
+                ValueError(model_dict["loss_function"], "not implemented")
+        
         # Evaluate generator model
         eval_gen_model = EvaluateGeneratorModel(
             data_class=data_class_init,
