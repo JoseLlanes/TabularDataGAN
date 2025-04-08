@@ -33,6 +33,8 @@ import Models.utils as utils
 
 from Processing.CategoricalProcessing import CategoricalToNumericalNorm as c2nn
 
+import warnings
+warnings.filterwarnings('ignore')
 
 class GeneratorExperiment:
     def __init__(
@@ -457,7 +459,10 @@ class EvaluateGeneratorModel:
                 )
             else:
                 idx = np.random.randint(0, self.data_train.shape[0], batch_data)
-                self.generator.fit(data=self.data_train.loc[idx].reset_index(drop=True))
+                try:
+                    self.generator.fit(data=self.data_train.loc[idx].reset_index(drop=True))
+                except:
+                    continue
                 synthetic_df = self.generator.sample(num_rows=batch_data)
             
             idx = np.random.randint(0, self.data_train.shape[0], batch_data)
@@ -502,12 +507,12 @@ class EvaluateGeneratorModel:
 
 if __name__ == "__main__":
     all_data_list = [
-        WisconsinDataPreprocessor,
-        WineQualityDataPreprocessor,
-        StudentDropoutDataPreprocessor,
-        MaternalDataPreprocessor,
-        TitanicDataPreprocessor,
         AdultDataPreprocessor,
+        TitanicDataPreprocessor,
+        MaternalDataPreprocessor,
+        StudentDropoutDataPreprocessor,
+        WineQualityDataPreprocessor,
+        WisconsinDataPreprocessor,
     ]
 
     generative_model_list = [
