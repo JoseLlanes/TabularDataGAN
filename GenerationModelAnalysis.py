@@ -576,9 +576,20 @@ if __name__ == "__main__":
             model_name=model_dict["model_name"],
         )
         
-        eval_gen_model.check_statistics()
-        eval_gen_model.ml_train_model_comparison()
-        eval_gen_model.ml_difference_real_generated_data()
+        try:
+            eval_gen_model.check_statistics()
+        except:
+            pass
+        
+        try:
+            eval_gen_model.ml_train_model_comparison()
+        except:
+            pass
+        
+        try:
+            eval_gen_model.ml_difference_real_generated_data()
+        except:
+            pass
 
         generator_eval_results_dict = eval_gen_model.eval_gen_model_dict
 
