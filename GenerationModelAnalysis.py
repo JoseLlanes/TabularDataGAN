@@ -569,7 +569,9 @@ if __name__ == "__main__":
             else:
                 ValueError(model_dict["loss_function"], "not implemented")
         
-        # Evaluate generator model
+        # ################################
+        # ### Evaluate generator model ###
+        # ################################
         eval_gen_model = EvaluateGeneratorModel(
             data_class=data_class_init,
             data_real_dict=data_dict,
@@ -577,20 +579,17 @@ if __name__ == "__main__":
             model_name=model_dict["model_name"],
         )
         
-        try:
-            eval_gen_model.check_statistics()
-        except:
-            pass
+        evaluation_methods_list = [
+            eval_gen_model.check_statistics,
+            eval_gen_model.ml_train_model_comparison,
+            eval_gen_model.ml_difference_real_generated_data
+        ]
         
-        try:
-            eval_gen_model.ml_train_model_comparison()
-        except:
-            pass
-        
-        try:
-            eval_gen_model.ml_difference_real_generated_data()
-        except:
-            pass
+        for method in evaluation_methods_list:
+            try:
+                method()
+            except:
+                pass
 
         generator_eval_results_dict = eval_gen_model.eval_gen_model_dict
 

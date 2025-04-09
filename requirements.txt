@@ -7,4 +7,3 @@ scipy==1.7.3
 torch==1.13.1
 sdv==1.2.0
 ctgan==0.7.3
-tabgan==2.2.1
