@@ -4,7 +4,8 @@ from Processing.CategoricalProcessing import CategoricalToNumericalNorm as c2nn
 
 
 class DataPreprocessor:
-    def __init__(self, path, sep=",", data_name="", target_column="", make_preprocess=True, include_categorical=True):
+    def __init__(self, path, sep=",", data_name="", target_column="", 
+                 make_preprocess=True, include_categorical=True, max_data_rows=2 * 10 ** 3):
         self.path = path
         self.sep = sep
         self.df = None
@@ -15,11 +16,14 @@ class DataPreprocessor:
         self.data_name = data_name
         self.make_preprocess = make_preprocess
         self.include_categorical = include_categorical
+        self.max_data_rows = max_data_rows
         self.all_category_inter = {}
 
     def load_data(self):
         """Loads CSV file into a DataFrame."""
         self.df = pd.read_csv(self.path, sep=self.sep)
+        if self.df.shape[0] > self.max_data_rows:
+            self.df = self.df.iloc[:self.max_data_rows]
 
     def process_categorical_columns(self):
         """Converts categorical columns into numeric representations."""

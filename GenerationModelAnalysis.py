@@ -6,6 +6,7 @@ import pandas as pd
 import scipy as sp
 import pickle
 import itertools
+from tqdm import tqdm
 
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -55,6 +56,26 @@ class GeneratorExperiment:
         self.data_train = self.data_real_dict["data"][self.data_real_dict["cols_to_study"]]
         self.model_dict = model_dict
 
+    def generate_sdv_model(self):
+        
+        sdv_metadata = SingleTableMetadata()
+        sdv_metadata.detect_from_dataframe(data=self.data_train)
+        
+        if model_dict["loss_function"] == "GaussianCopulaSynthesizer":
+            generator_model = GaussianCopulaSynthesizer(sdv_metadata)
+        elif model_dict["loss_function"] == "CopulaGANSynthesizer":
+            generator_model = CopulaGANSynthesizer(sdv_metadata)
+        elif model_dict["loss_function"] == "CTGANSynthesizer":
+            generator_model = CTGANSynthesizer(sdv_metadata)
+        elif model_dict["loss_function"] == "TVAESynthesizer":
+            generator_model = TVAESynthesizer(sdv_metadata)
+        else:
+            ValueError(model_dict["loss_function"], "not implemented")
+            
+        generator_model.fit(data=self.data_train)
+        
+        return generator_model
+    
     def generate_model_from_data(self, verbose=False):        
         # Data Min-Max scaling
         scaler = MinMaxScaler()
@@ -166,7 +187,7 @@ class GeneratorExperiment:
 # ### Evaluate Generator Model ###
 # ################################
 class EvaluateGeneratorModel:
-    def __init__(self, data_class, data_real_dict, generator, model_name):
+    def __init__(self, data_class, data_real_dict, generator, model_name, max_batch_data=1 * 10 ** 3):
         self.data_class = data_class
         self.data_real_dict = data_real_dict
         self.data_train = self.data_real_dict["data"][self.data_real_dict["cols_to_study"]]
@@ -181,13 +202,23 @@ class EvaluateGeneratorModel:
 
         self.cv_n_splits = 5
         self.cv_n_repeats = 4
+        self.max_batch_data = max_batch_data
         
         self.eval_gen_model_dict = {}
 
-    def train_model(self, data_to_ml, ml_input_col, data_test=None, target_col="RealTarget", join_data=None):
+    def train_model(self, data_to_ml, ml_input_col, 
+                    data_test=None, 
+                    target_col="RealTarget", 
+                    join_data=None, join_data_batch=500):
         
         if data_test is None:
             data_test = data_to_ml.copy()
+        
+        if join_data is not None:
+            # To get the same number of samples in the train with or without concatenation
+            # it is computed from the batch number and the proportion in the train of the CV, 
+            # the amount of samples to use in the training.
+            join_num_samples = int(np.round(join_data_batch * (1 - (1 / self.cv_n_splits)), 0))
         
         rkf = RepeatedKFold(n_splits=self.cv_n_splits, n_repeats=self.cv_n_repeats)
 
@@ -199,6 +230,11 @@ class EvaluateGeneratorModel:
             if join_data is not None:
                 x_train = pd.concat([x_train, join_data[ml_input_col]], ignore_index=True)
                 y_train = pd.concat([y_train, join_data[target_col]], ignore_index=True)
+                
+                idx = np.random.randint(0, x_train.shape[0], join_num_samples)
+                
+                x_train = x_train.loc[idx]
+                y_train = y_train.loc[idx]
 
             if len(np.unique(y_train)) < 2:
                 continue
@@ -217,10 +253,12 @@ class EvaluateGeneratorModel:
         return help_list
 
     # Study if a ML model could distinguish between generated and real data
-    def ml_difference_real_generated_data(self, num_generate_th=30, batch_data=500):
+    def ml_difference_real_generated_data(self, num_generate_th=30, batch_data_rate=0.5):
         target_col = "RealTarget"
         data_column_dim = self.data_train.shape[1]
-
+        batch_data = int(np.round(self.data_train.shape[0] * batch_data_rate, 0))
+        batch_data = min(self.max_batch_data, batch_data)
+        
         if model_dict["model_name"] in ["LinearNN", "CNN1D"]:
             
             scaler = MinMaxScaler()
@@ -276,8 +314,8 @@ class EvaluateGeneratorModel:
             help_list = []
             for _ in range(num_generate_th):
 
-                idx = np.random.randint(0, df_to_sdv.shape[0], batch_data)
-                self.generator.fit(data=df_to_sdv.loc[idx].reset_index(drop=True))
+                # idx = np.random.randint(0, df_to_sdv.shape[0], batch_data)
+                # self.generator.fit(data=df_to_sdv.loc[idx].reset_index(drop=True))
                 synthetic_df_sdv = self.generator.sample(num_rows=batch_data)
                 synthetic_df_sdv[target_col] = 0
 
@@ -300,12 +338,16 @@ class EvaluateGeneratorModel:
             {"ml_difference_real_generated_data": df_gen_ml_metrics}
         )
 
-    def ml_train_model_comparison(self, num_generate_th=30, batch_data=1000):
+    # Study the difference between train with data from real, synthetic and both combined datasets
+    def ml_train_model_comparison(self, num_generate_th=30, batch_data_rate=0.5):
         
         target_col = self.data_class.target_column
         data_column_dim = self.data_train.shape[1]
         category_inter = self.data_class.all_category_inter[target_col]
         ml_input_list = [col for col in self.data_train.columns if target_col not in col]
+        
+        batch_data = int(np.round(self.data_train.shape[0] * batch_data_rate, 0))
+        batch_data = min(self.max_batch_data, batch_data)
         
         df_to_ml = self.data_train
         
@@ -367,7 +409,8 @@ class EvaluateGeneratorModel:
                         data_test=test_data, 
                         target_col="target", 
                         ml_input_col=ml_input_list, 
-                        join_data=join_data
+                        join_data=join_data,
+                        join_data_batch=batch_data
                     )
                     rename_dict = {col: f"{col}_{scenario_name}" for col in self.metrics_skm_dict.keys()}
                     df_results_list.append(pd.DataFrame(results).rename(columns=rename_dict))
@@ -381,8 +424,8 @@ class EvaluateGeneratorModel:
             help_list = []
             for _ in range(num_generate_th):
                 # ### Generated data ###
-                idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
-                self.generator.fit(data=df_to_ml.loc[idx].reset_index(drop=True))
+                # idx = np.random.randint(0, df_to_ml.shape[0], batch_data)
+                # self.generator.fit(data=df_to_ml.loc[idx].reset_index(drop=True))
                 synthetic_df_sdv = self.generator.sample(num_rows=batch_data)
 
                 # Transform to classification column the target column
@@ -432,9 +475,12 @@ class EvaluateGeneratorModel:
             {"ml_train_model_comparison": df_ml_metrics}
         )
         
-    def check_statistics(self, num_generate_th=30, batch_data=500):
+    def check_statistics(self, num_generate_th=30, batch_data_rate=0.5):
         
         data_column_dim = self.data_train.shape[1]
+        
+        batch_data = int(np.round(self.data_train.shape[0] * batch_data_rate, 0))
+        batch_data = min(self.max_batch_data, batch_data)
         
         help_list = []
         for _ in range(num_generate_th):
@@ -459,11 +505,6 @@ class EvaluateGeneratorModel:
                     synthetic_data, columns=self.data_real_dict["cols_to_study"]
                 )
             else:
-                idx = np.random.randint(0, self.data_train.shape[0], batch_data)
-                try:
-                    self.generator.fit(data=self.data_train.loc[idx].reset_index(drop=True))
-                except:
-                    continue
                 synthetic_df = self.generator.sample(num_rows=batch_data)
             
             idx = np.random.randint(0, self.data_train.shape[0], batch_data)
@@ -484,7 +525,8 @@ class EvaluateGeneratorModel:
             quality_report = evaluate_quality(
                 df_real_sample,
                 synthetic_df,
-                sdv_metadata
+                sdv_metadata,
+                verbose=False
             )
             help_dict["SDV_QR_score"] = quality_report.get_score()
             
@@ -501,9 +543,7 @@ class EvaluateGeneratorModel:
         
         df_stats = pd.DataFrame(stats_dict, index=[0])
         
-        self.eval_gen_model_dict.update(
-            {"check_statistics": df_stats}
-        )
+        self.eval_gen_model_dict.update({"check_statistics": df_stats})
 
 
 if __name__ == "__main__":
@@ -537,17 +577,25 @@ if __name__ == "__main__":
 
     data_model_list = [all_data_list, generative_model_list]
     comb_data_gen_list = list(itertools.product(*data_model_list))
-    for data_class, model_dict in comb_data_gen_list:
+    
+    t0 = time.time()
+    
+    tqdm_to_loop = tqdm(comb_data_gen_list, 
+                        total=len(comb_data_gen_list), 
+                        desc="Processing models and datasets")
+    
+    for data_class, model_dict in tqdm_to_loop:
         
         data_class_init = data_class()
         data_dict = data_class_init.custom_preprocess()
         
-        print(data_dict["data_name"], model_dict["model_name"], model_dict["loss_function"])
-        print("Columns to use model", data_dict["cols_to_study"])
+        # print(data_dict["data_name"], model_dict["model_name"], model_dict["loss_function"])
+        # print("Columns to use model", data_dict["cols_to_study"])
 
+        gen_experiment = GeneratorExperiment(data_real_dict=data_dict, model_dict=model_dict)
+        
         if model_dict["model_name"] != "SDV":
-            gen_experiment = GeneratorExperiment(data_real_dict=data_dict, model_dict=model_dict)
-            generator_model = gen_experiment.generate_model_from_data(verbose=True)
+            generator_model = gen_experiment.generate_model_from_data(verbose=False)
             
             gc.collect()
             torch.cuda.empty_cache()
@@ -556,19 +604,11 @@ if __name__ == "__main__":
             os.remove("SaveModels/generator_NN.pth")
             
         else:
-            sdv_metadata = SingleTableMetadata()
-            sdv_metadata.detect_from_dataframe(data=data_dict["data"][data_dict["cols_to_study"]])
-            if model_dict["loss_function"] == "GaussianCopulaSynthesizer":
-                generator_model = GaussianCopulaSynthesizer(sdv_metadata)
-            elif model_dict["loss_function"] == "CopulaGANSynthesizer":
-                generator_model = CopulaGANSynthesizer(sdv_metadata)
-            elif model_dict["loss_function"] == "CTGANSynthesizer":
-                generator_model = CTGANSynthesizer(sdv_metadata)
-            elif model_dict["loss_function"] == "TVAESynthesizer":
-                generator_model = TVAESynthesizer(sdv_metadata)
-            else:
-                ValueError(model_dict["loss_function"], "not implemented")
-        
+            generator_model = gen_experiment.generate_sdv_model()
+            if generator_model is None:
+                print("Error model in:", data_dict["data_name"], model_dict["model_name"], model_dict["loss_function"])
+                continue
+            
         # ################################
         # ### Evaluate generator model ###
         # ################################
@@ -589,6 +629,7 @@ if __name__ == "__main__":
             try:
                 method()
             except:
+                print("Error with", data_dict["data_name"], model_dict["model_name"], model_dict["loss_function"])
                 pass
 
         generator_eval_results_dict = eval_gen_model.eval_gen_model_dict
@@ -601,3 +642,5 @@ if __name__ == "__main__":
             pickle.dump(generator_eval_results_dict, f)
             
         del data_class
+        
+    print("Total processing time = ", np.round((time.time() - t0)/60 ** 2, 4), "hours")
