@@ -1,11 +1,13 @@
 import pandas as pd
+import numpy as np
 
 from Processing.CategoricalProcessing import CategoricalToNumericalNorm as c2nn
 
 
 class DataPreprocessor:
     def __init__(self, path, sep=",", data_name="", target_column="", 
-                 make_preprocess=True, include_categorical=True, max_data_rows=2 * 10 ** 3):
+                 make_preprocess=True, include_categorical=True, 
+                 allow_reduction=False, max_data_rows=2 * 10 ** 3):
         self.path = path
         self.sep = sep
         self.df = None
@@ -16,13 +18,14 @@ class DataPreprocessor:
         self.data_name = data_name
         self.make_preprocess = make_preprocess
         self.include_categorical = include_categorical
+        self.allow_reduction = allow_reduction
         self.max_data_rows = max_data_rows
         self.all_category_inter = {}
 
     def load_data(self):
         """Loads CSV file into a DataFrame."""
         self.df = pd.read_csv(self.path, sep=self.sep)
-        if self.df.shape[0] > self.max_data_rows:
+        if self.df.shape[0] > self.max_data_rows and self.allow_reduction:
             self.df = self.df.iloc[:self.max_data_rows]
 
     def process_categorical_columns(self):
@@ -64,7 +67,9 @@ class DataPreprocessor:
 
 
 class AdultDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/UCI Adult Dataset.csv", data_name="Adult", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/UCI Adult Dataset.csv", data_name="Adult",
+                 allow_reduction=True, 
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path)
         self.data_name = data_name
         self.make_preprocess = make_preprocess
@@ -95,7 +100,9 @@ class AdultDataPreprocessor(DataPreprocessor):
 
 
 class MaternalDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/Maternal Health Risk Data Set.csv", data_name="Maternal", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/Maternal Health Risk Data Set.csv", data_name="Maternal",
+                 allow_reduction=True,
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path)
         self.data_name = data_name
         self.make_preprocess = make_preprocess
@@ -125,16 +132,18 @@ class MaternalDataPreprocessor(DataPreprocessor):
 
 
 class TitanicDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/Titanic.csv", data_name="Titanic", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/Titanic.csv", data_name="Titanic",
+                 allow_reduction=True,
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path)
         self.data_name = data_name
         self.make_preprocess = make_preprocess
         self.include_categorical = include_categorical
         self.target_column = "Survived"
-        self.cols_to_study = ["Age", "Fare"]
+        self.cols_to_study = ["Age", "Fare"] + [self.target_column]
         self.categorical_columns = [
             "Pclass", "Sex", 'SibSp', 'Parch', 'Cabin', 'Embarked'
-        ] + [self.target_column]
+        ]
         self.nan_columns = ['Cabin', 'Embarked']
         
         
@@ -143,7 +152,9 @@ class TitanicDataPreprocessor(DataPreprocessor):
     
     
 class StudentDropoutDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/students_dropout.csv", data_name="StudentDropout", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/students_dropout.csv", data_name="StudentDropout",
+                 allow_reduction=True, 
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path, sep=";")
         self.data_name = data_name
         self.make_preprocess = make_preprocess
@@ -183,7 +194,9 @@ class StudentDropoutDataPreprocessor(DataPreprocessor):
     
     
 class WineQualityDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/winequality-white.csv", data_name="WineQuality", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/winequality-white.csv", data_name="WineQuality", 
+                 allow_reduction=True,
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path, sep=";")
         self.data_name = data_name
         self.make_preprocess = make_preprocess
@@ -217,7 +230,9 @@ class WineQualityDataPreprocessor(DataPreprocessor):
     
     
 class WisconsinDataPreprocessor(DataPreprocessor):
-    def __init__(self, path="Data/wdbc.csv", data_name="Wisconsin", make_preprocess=True, include_categorical=True):
+    def __init__(self, path="Data/wdbc.csv", data_name="Wisconsin",
+                 allow_reduction=True,
+                 make_preprocess=True, include_categorical=True):
         super().__init__(path)
         self.data_name = data_name
         self.make_preprocess = make_preprocess
@@ -244,3 +259,30 @@ class WisconsinDataPreprocessor(DataPreprocessor):
         data_dict["target_col"] = target_col
         
         return data_dict
+
+
+if __name__ == "__main__":
+    all_data_list = [
+        AdultDataPreprocessor,
+        TitanicDataPreprocessor,
+        MaternalDataPreprocessor,
+        StudentDropoutDataPreprocessor,
+        WineQualityDataPreprocessor,
+        WisconsinDataPreprocessor,
+    ]
+    
+    for data_class in all_data_list:
+        
+        data_init = data_class(allow_reduction=False)
+        data_init.load_data()
+        original_data = data_init.df.copy()
+        data_dict = data_init.custom_preprocess()
+        
+        print("Data Name:", data_dict["data_name"])
+        print("Data Shape:", original_data.shape)
+        print("Percentage of Nans:", np.round(100 * np.mean(original_data.isna()), 2), "%")
+        print("Categorical columns:", len(data_init.categorical_columns))
+        print("Target unbalancement:", np.round(100 * np.mean(data_dict["data"][data_dict["target_col"]] == 1), 2), "%")
+        # print("Data Name:", data_dict["data_name"])
+
+        print()
