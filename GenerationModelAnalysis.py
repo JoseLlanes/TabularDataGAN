@@ -534,26 +534,26 @@ class EvaluateGeneratorModel:
 
         df_help = pd.DataFrame(help_list)   
         
-        stats_dict = {}
-        for col in df_help.columns:
-            if col == "SDV_QR_score":
-                stats_dict[f"mean_{col}"] = np.mean(df_help[col])
-            else:
-                stats_dict[f"up_05_pvalue_{col}"] = np.mean(df_help[col] > 0.05)
+        # stats_dict = {}
+        # for col in df_help.columns:
+        #     if col == "SDV_QR_score":
+        #         stats_dict[f"mean_{col}"] = np.mean(df_help[col])
+        #     else:
+        #         stats_dict[f"up_05_pvalue_{col}"] = np.mean(df_help[col] > 0.05)
         
-        df_stats = pd.DataFrame(stats_dict, index=[0])
+        # df_stats = pd.DataFrame(stats_dict, index=[0])
         
-        self.eval_gen_model_dict.update({"check_statistics": df_stats})
+        self.eval_gen_model_dict.update({"check_statistics": df_help})
 
 
 if __name__ == "__main__":
     all_data_list = [
+        WisconsinDataPreprocessor,
         AdultDataPreprocessor,
         TitanicDataPreprocessor,
         MaternalDataPreprocessor,
         StudentDropoutDataPreprocessor,
         WineQualityDataPreprocessor,
-        WisconsinDataPreprocessor,
     ]
 
     generative_model_list = [

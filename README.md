@@ -7,3 +7,5 @@ In this approach, statistical metrics are computed for each variable, such as th
 The developed GAN models integrate these statistical metrics into the cost function, allowing the training process to adjust the model weights to better match the distributions of the original data.
 
 This work also studies the [SDV library](https://github.com/sdv-dev/SDV) and compares its models with the ones developed in this repository.
+
+The tests performed are also presented as a research work in the document Tabular_GAN_PINN.pdf.
